@@ -9,9 +9,10 @@ export type LetterCell = {
 };
 
 export type LetterGuessState =
-  | "Indeterminate"
-  | "Absent"
-  | "Present"
-  | "Correct";
+  | "empty"
+  | "tbd"
+  | "absent"
+  | "present"
+  | "correct";
 
 export type GameState = "IN_PROGRESS" | "GUESSED_CORRECTLY" | "NO_MORE_GUESSES";

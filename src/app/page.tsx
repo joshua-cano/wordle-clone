@@ -2,27 +2,18 @@
 
 import { Keyboard } from "@/components/keyboard";
 import { Grid } from "@/components/wordle-grid";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LetterGuessState, GridCell, GameState } from "./types";
-
-// const WORDS = Object.freeze([
-//   "APPLE",
-//   "BEAST",
-//   "FAINT",
-//   "FEAST",
-//   "FRUIT",
-//   "GAMES",
-//   "PAINT",
-//   "PASTE",
-//   "TOWER",
-//   "REACT",
-// ]);
+import { WORDS } from "./words";
+import { GameResult } from "@/components/GameResult";
+import { Confetti, ConfettiRef } from "@/components/confetti";
 
 const LETTER_GUESS_STATE_PRIORITY = {
-  Indeterminate: 1,
-  Absent: 2,
-  Present: 3,
-  Correct: 4,
+  empty: 0,
+  tbd: 1,
+  absent: 2,
+  present: 3,
+  correct: 4,
 };
 
 function getInitialGridState(
@@ -32,7 +23,7 @@ function getInitialGridState(
   return Array.from({ length: maxAttempts }, () =>
     Array.from({ length: lettersPerWord }, () => ({
       char: "",
-      state: "Indeterminate",
+      state: "empty",
     }))
   );
 }
@@ -52,17 +43,55 @@ function countLetterFreqInWord(word: string) {
   return freq;
 }
 
+function generateRandomWord() {
+  return WORDS[Math.floor(Math.random() * WORDS.length)];
+}
+
 export default function Home() {
-  const [wordOfTheGame, setWordOfTheGame] = useState("apple");
+  const confettiRef = useRef<ConfettiRef>(null);
+  const [wordOfTheGame, setWordOfTheGame] = useState(() =>
+    generateRandomWord()
+  );
   const [gameState, setGameState] = useState<GameState>("IN_PROGRESS");
-
   const [gridState, setGridState] = useState(() => getInitialGridState(6, 5));
-
   const [position, setPosition] = useState([0, -1]);
-
   const [letterGuessState, setLetterGuessState] = useState<
     Record<string, LetterGuessState>
   >({});
+
+  useEffect(() => {
+    console.log(`[DEBUG]: Word of the day is: ${wordOfTheGame}`);
+  }, [wordOfTheGame]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+
+      if (
+        event.target !== document.body &&
+        (event.key === "Enter" || event.key === " ")
+      ) {
+        return;
+      }
+
+      onPressKey(event.key);
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  });
+
+  useEffect(() => {
+    if (gameState === "GUESSED_CORRECTLY") {
+      confettiRef.current?.fire({
+        particleCount: 200,
+        spread: 70,
+        origin: { y: 0.6 },
+      });
+    }
+  }, [gameState]);
 
   function addLetter(char: string) {
     const [row, col] = position;
@@ -74,7 +103,7 @@ export default function Home() {
 
     const newGridState = [...gridState];
     const newRow = [...newGridState[row]];
-    newRow[nextCell] = { ...newRow[nextCell], char: char };
+    newRow[nextCell] = { state: "tbd", char: char.toUpperCase() };
     newGridState[row] = newRow;
 
     setGridState(newGridState);
@@ -90,7 +119,7 @@ export default function Home() {
 
     const newGridState = [...gridState];
     const newRow = [...newGridState[row]];
-    newRow[col] = { ...newRow[col], char: "" };
+    newRow[col] = { state: "empty", char: "" };
     newGridState[row] = newRow;
 
     setGridState(newGridState);
@@ -117,10 +146,10 @@ export default function Home() {
       const currentActualChar = wordOfTheGame[i];
 
       if (currentChar === currentActualChar) {
-        newRow[i] = { ...newRow[i], state: "Correct" };
+        newRow[i] = { ...newRow[i], state: "correct" };
         newGridState[row] = newRow;
 
-        newLetterGuessState[currentChar] = "Correct";
+        newLetterGuessState[currentChar] = "correct";
 
         letterFreq.set(currentChar, letterFreq.get(currentChar) - 1);
 
@@ -142,30 +171,26 @@ export default function Home() {
       const char = word[idx];
       if (letterFreq.has(char) && letterFreq.get(char) > 0) {
         letterFreq.set(char, letterFreq.get(char) - 1);
-        newRow[idx] = { ...newRow[idx], state: "Present" };
+        newRow[idx] = { ...newRow[idx], state: "present" };
         newGridState[row] = newRow;
         // Only change state if the new state is higher priority
         // than the current state.
         if (
-          LETTER_GUESS_STATE_PRIORITY["Present"] >
-          LETTER_GUESS_STATE_PRIORITY[
-            newLetterGuessState[char] ?? "Indeterminate"
-          ]
+          LETTER_GUESS_STATE_PRIORITY["present"] >
+          LETTER_GUESS_STATE_PRIORITY[newLetterGuessState[char] ?? "empty"]
         ) {
-          newLetterGuessState[char] = "Present";
+          newLetterGuessState[char] = "present";
         }
       } else {
-        newRow[idx] = { ...newRow[idx], state: "Absent" };
+        newRow[idx] = { ...newRow[idx], state: "absent" };
         newGridState[row] = newRow;
         // Only change state if the new state is higher priority
         // than the current state.
         if (
-          LETTER_GUESS_STATE_PRIORITY["Absent"] >
-          LETTER_GUESS_STATE_PRIORITY[
-            newLetterGuessState[char] ?? "Indeterminate"
-          ]
+          LETTER_GUESS_STATE_PRIORITY["absent"] >
+          LETTER_GUESS_STATE_PRIORITY[newLetterGuessState[char] ?? "empty"]
         ) {
-          newLetterGuessState[char] = "Absent";
+          newLetterGuessState[char] = "absent";
         }
       }
     });
@@ -182,11 +207,20 @@ export default function Home() {
     setPosition([row + 1, -1]);
   }
 
-  function isValidKey(key: string) {
-    return key === "Enter" || key === "Backspace" || /^[a-zA-Z]$/.test(key);
-  }
+  const resetGame = () => {
+    console.trace("[RESET GAME CALLED]");
+    setWordOfTheGame(generateRandomWord());
+    setGridState(getInitialGridState(6, 5));
+    setPosition([0, -1]);
+    setGameState("IN_PROGRESS");
+    setLetterGuessState({});
+  };
 
-  function onPressKey(key: string) {
+  const isValidKey = (key: string) => {
+    return key === "Enter" || key === "Backspace" || /^[a-zA-Z]$/.test(key);
+  };
+
+  const onPressKey = (key: string) => {
     if (gameState !== "IN_PROGRESS") return;
 
     if (!isValidKey(key)) return;
@@ -202,30 +236,29 @@ export default function Home() {
         addLetter(key);
         break;
     }
-  }
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
-        return;
-      }
-
-      if (
-        event.target !== document.body &&
-        (event.key === "Enter" || event.key === " ")
-      ) {
-        return;
-      }
-
-      onPressKey(event.key);
-    }
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  });
+  };
 
   return (
-    <div className="max-w-[500px] mx-auto flex flex-col w-full">
+    <div className="max-w-xl mx-auto flex flex-col items-center relative">
+      <GameResult
+        gameState={gameState}
+        wordOfTheGame={wordOfTheGame}
+        onReset={resetGame}
+      />
+
+      <Confetti
+        ref={confettiRef}
+        manualstart
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100vw",
+          height: "100vh",
+          pointerEvents: "none",
+          zIndex: 9990,
+        }}
+      />
       <Grid letters={gridState} />
       <Keyboard onPressKey={onPressKey} letterGuessState={letterGuessState} />
     </div>
